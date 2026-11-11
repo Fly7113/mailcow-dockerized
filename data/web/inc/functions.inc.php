@@ -2484,6 +2484,7 @@ function identity_provider($_action = null, $_data = null, $_extra = null) {
       $stmt = $pdo->prepare("SELECT * FROM `mailbox`
           WHERE `authsource` != 'mailcow'
           AND `authsource` IS NOT NULL
+          AND `authsource` != 'scim'
           AND `authsource` != :authsource");
       $stmt->execute(array(':authsource' => $_data['authsource']));
       $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -2875,7 +2876,7 @@ function identity_provider($_action = null, $_data = null, $_extra = null) {
       $stmt->execute(array(':user' => $info['email']));
       $row = $stmt->fetch(PDO::FETCH_ASSOC);
       if ($row){
-        if (!in_array($row['authsource'], array("keycloak", "generic-oidc"))) {
+        if (!in_array($row['authsource'], array("keycloak", "generic-oidc", "scim"))) {
           clear_session();
           $_SESSION['return'][] =  array(
             'type' => 'danger',
@@ -2893,7 +2894,8 @@ function identity_provider($_action = null, $_data = null, $_extra = null) {
           );
           return false;
         }
-        $update_template = $idp_login->templateFor($info['email'], $mapped_template);
+        // SCIM mailboxes keep the template SCIM applied, only group templates follow them at login
+        $update_template = $idp_login->templateFor($info['email'], ($row['authsource'] == 'scim') ? null : $mapped_template);
         if ($update_template !== null) {
           // update user
           $_SESSION['access_all_exception'] = '1';
@@ -3069,7 +3071,7 @@ function identity_provider($_action = null, $_data = null, $_extra = null) {
           AND `username` = :user");
       $stmt->execute(array(':user' => $info['email']));
       $row = $stmt->fetch(PDO::FETCH_ASSOC);
-      if (!$row || !in_array($row['authsource'], array('keycloak', 'generic-oidc'))) {
+      if (!$row || !in_array($row['authsource'], array('keycloak', 'generic-oidc', 'scim'))) {
         clear_session();
         $_SESSION['return'][] =  array(
           'type' => 'danger',
@@ -3691,6 +3693,20 @@ function get_logs($application, $lines = false) {
     }
     else {
       $data = $redis->lRange('CRON_LOG', 0, $lines);
+    }
+    if ($data) {
+      foreach ($data as $json_line) {
+        $data_array[] = json_decode($json_line, true);
+      }
+      return $data_array;
+    }
+  }
+  if ($application == "scim-mailcow") {
+    if (isset($from) && isset($to)) {
+      $data = $redis->lRange('SCIM_LOG', $from - 1, $to - 1);
+    }
+    else {
+      $data = $redis->lRange('SCIM_LOG', 0, $lines);
     }
     if ($data) {
       foreach ($data as $json_line) {

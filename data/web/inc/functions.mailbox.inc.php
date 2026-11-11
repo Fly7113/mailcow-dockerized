@@ -881,7 +881,7 @@ function mailbox($_action, $_type, $_data = null, $_extra = null) {
             );
             return false;
           }
-          if ($_data['authsource'] == "mailcow" ||
+          if ($_data['authsource'] == "mailcow" || $_data['authsource'] == "scim" ||
               in_array($_data['authsource'], array('keycloak', 'generic-oidc', 'ldap')) && $iam_settings['authsource'] == $_data['authsource']){
             $authsource = $_data['authsource'];
           }
@@ -953,7 +953,7 @@ function mailbox($_action, $_type, $_data = null, $_extra = null) {
           }
           $quota_b    = ($quota_m * 1048576);
           $attribute_hash = (!empty($_data['attribute_hash'])) ? $_data['attribute_hash'] : '';
-          if (in_array($authsource, array('keycloak', 'generic-oidc', 'ldap'))){
+          if (in_array($authsource, array('keycloak', 'generic-oidc', 'ldap', 'scim'))){
             $force_pw_update = 0;
           }
           if ($authsource == 'generic-oidc'){
@@ -1261,6 +1261,10 @@ function mailbox($_action, $_type, $_data = null, $_extra = null) {
           $mbox_template_data['local_part'] = $_data['local_part'];
           $mbox_template_data['authsource'] = $_data['authsource'];
           $mbox_template_data['attribute_hash'] = $attribute_hash;
+          if (isset($_data['active'])) {
+            // the caller's state wins over the template's, e.g. a SCIM user created with active=false
+            $mbox_template_data['active'] = intval($_data['active']);
+          }
           $mbox_template_data['quota'] = intval($mbox_template_data['quota'] / 1048576);
 
           $mailbox_attributes = array('acl' => array());
@@ -2824,11 +2828,11 @@ function mailbox($_action, $_type, $_data = null, $_extra = null) {
               $tags                 = (is_array($_data['tags']) ? $_data['tags'] : array());
               $attribute_hash       = (!empty($_data['attribute_hash'])) ? $_data['attribute_hash'] : '';
               $authsource           = $is_now['authsource'];
-              if ($_data['authsource'] == "mailcow" ||
+              if ($_data['authsource'] == "mailcow" || $_data['authsource'] == "scim" ||
                   in_array($_data['authsource'], array('keycloak', 'generic-oidc', 'ldap')) && $iam_settings['authsource'] == $_data['authsource']){
                 $authsource = $_data['authsource'];
               }
-              if (in_array($authsource, array('keycloak', 'generic-oidc', 'ldap'))){
+              if (in_array($authsource, array('keycloak', 'generic-oidc', 'ldap', 'scim'))){
                 $force_pw_update = 0;
               }
               if ($authsource == 'generic-oidc'){
@@ -3424,9 +3428,10 @@ function mailbox($_action, $_type, $_data = null, $_extra = null) {
           if ($applied_template === null || $applied_template === $_data['template']) {
             unset($mbox_template_data['active']);
           }
-          // Login disabled by the IdP sync is only lifted by the sync
-          $stmt = $pdo->prepare("SELECT `idp_disabled` FROM `identity_link` WHERE `username` = :username");
-          $stmt->execute(array(':username' => $_data['username']));
+          // Login disabled by the IdP sync or SCIM is only lifted by them
+          $stmt = $pdo->prepare("SELECT 1 FROM `identity_link` WHERE `username` = :username AND `idp_disabled` = 1
+            UNION SELECT 1 FROM `scim_maps` WHERE `username` = :username2 AND `disabled` = 1");
+          $stmt->execute(array(':username' => $_data['username'], ':username2' => $_data['username']));
           if (intval($stmt->fetchColumn()) == 1) {
             unset($mbox_template_data['active']);
           }
